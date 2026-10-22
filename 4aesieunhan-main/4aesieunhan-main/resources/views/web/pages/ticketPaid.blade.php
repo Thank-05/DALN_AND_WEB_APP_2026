@@ -282,9 +282,9 @@
     </div>
     <div class="right">
         <p class="admit-one">
-            <span>HMCinema</span>
-            <span>HMCinema</span>
-            <span>HMCinema</span>
+            <span>TTCinema</span>
+            <span>TTCinema</span>
+            <span>TTCinema</span>
         </p>
         <div class="right-info-container">
             <div class="barcode">

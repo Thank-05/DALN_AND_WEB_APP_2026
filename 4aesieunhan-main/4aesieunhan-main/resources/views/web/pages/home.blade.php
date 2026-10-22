@@ -196,7 +196,7 @@
                 <a href="/news" class="btn btn-outline-warning w-auto">@lang('lang.more') ></a>
             </div>
             @endif
-            <div class="zalo-chat-widget" data-oaid="4011839899851309095" data-welcome-message="Rất vui khi được hỗ trợ bạn, vui lòng để lại lời nhắn HMCinema sẽ trả lời bạn trong giây lát !" data-autopopup="0" data-width="" data-height=""></div>
+            <div class="zalo-chat-widget" data-oaid="4011839899851309095" data-welcome-message="Rất vui khi được hỗ trợ bạn, vui lòng để lại lời nhắn TTCinema sẽ trả lời bạn trong giây lát !" data-autopopup="0" data-width="" data-height=""></div>
 
 
         </div>

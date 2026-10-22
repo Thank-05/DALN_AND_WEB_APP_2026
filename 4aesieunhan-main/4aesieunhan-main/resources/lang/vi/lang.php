@@ -213,7 +213,7 @@ return [
     'sort_this_month' => 'Lọc tháng này',
     'sort_last_month' => 'Lọc tháng trước',
     'sort_by_7days' => 'Lọc theo 7 ngày',
-    'active_email' => 'Vui lòng kích hoạt email để nhận các ưu đãi từ HMCinema ! ',
+    'active_email' => 'Vui lòng kích hoạt email để nhận các ưu đãi từ TTCinema ! ',
     'receivedCombo' => 'Trạng thái Combo',
     'not_scanned' => 'Chưa nhận',
     'scanned' => 'Đã nhận',

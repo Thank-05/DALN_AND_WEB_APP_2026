@@ -560,7 +560,7 @@ class WebController extends Controller
                 'cloud' => $cloud,
                 'cloud_name' => cloud_name(),
             ], function ($email) use ($email_cur) {
-                $email->subject('Vé xem phim tại HM Cinema');
+                $email->subject('Vé xem phim tại TTCinema');
                 $email->to($email_cur);
             });
         }
@@ -622,7 +622,7 @@ class WebController extends Controller
         }
         $feedback->save();
         return response()->json([
-            'success' => 'Thông tin của bạn đã được gửi thành công. HMCinema xin cảm ơn ý kiến của bạn về hệ thống !',
+            'success' => 'Thông tin của bạn đã được gửi thành công. TTCinema xin cảm ơn ý kiến của bạn về hệ thống !',
         ]);
     }
     public function ticket_apply_discount(Request $request)

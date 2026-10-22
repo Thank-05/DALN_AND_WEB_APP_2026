@@ -25,67 +25,68 @@ class AdminController extends Controller
         view()->share('info', $info);
     }
 
+    // Chỉ tính vé đã thanh toán
+    private function paidTickets($from, $to)
+    {
+        return Ticket::with('ticketSeats', 'schedule.room')
+            ->whereBetween('created_at', [$from, $to])
+            ->where('hasPaid', 1)
+            ->orderBy('created_at', 'ASC')
+            ->get();
+    }
+
+    // Gắn tổng tiền + số ghế đã thanh toán vào từng phim / rạp
+    private function attachMovieTotals($movies)
+    {
+        foreach ($movies as $movie) {
+            $tickets = $movie->schedules->flatMap->Ticket->where('hasPaid', 1);
+            $movie->setAttribute('totalPrice', $tickets->sum('totalPrice'));
+            $movie->setAttribute('ticketseats', $tickets->sum(fn ($t) => $t->ticketseats->count()));
+        }
+        return $movies->sortByDesc('totalPrice');
+    }
+
+    private function attachTheaterTotals($theaters)
+    {
+        foreach ($theaters as $theater) {
+            $tickets = $theater->rooms->flatMap->schedules->flatMap->Ticket->where('hasPaid', 1);
+            $theater->setAttribute('totalPrice', $tickets->sum('totalPrice'));
+            $theater->setAttribute('ticketseats', $tickets->sum(fn ($t) => $t->ticketseats->count()));
+        }
+        return $theaters->sortByDesc('totalPrice');
+    }
+
+    // Gom vé theo ngày (d-m-Y) hoặc tháng (m-Y) cho biểu đồ
+    private function chartData($tickets, $format)
+    {
+        return $tickets
+            ->groupBy(fn ($t) => date($format, strtotime($t->created_at)))
+            ->map(fn ($group, $date) => [
+                'date' => $date,
+                'total' => $group->sum('totalPrice'),
+                'seat_count' => $group->sum(fn ($t) => $t->ticketSeats->count()),
+            ])
+            ->values();
+    }
+
     public function home(Request $request)
     {
         $now = Carbon::now('Asia/Ho_Chi_Minh')->endOfDay();
         $year = Carbon::now('Asia/Ho_Chi_Minh')->subDays(365)->startOfYear()->toDateString();
         $start_of_month = Carbon::now('Asia/Ho_Chi_Minh')->startOfMonth();
-        $total_year = Ticket::whereBetween('created_at', [$year, $now])->where('hasPaid', 1)->orderBy('created_at', 'ASC')->get();
-        $theaters = Theater::orderBy('id', 'ASC')->get();
-        $ticket = Ticket::whereDate('created_at', Carbon::today())->where('hasPaid', 1)->get();
-        $ticket_seat = TicketSeat::get()->whereBetween('created_at', [$year, $now])->count();
+        $total_year = $this->paidTickets($year, $now);
+        $ticket = Ticket::whereDate('created_at', Carbon::today('Asia/Ho_Chi_Minh'))->where('hasPaid', 1)->get();
+        $ticket_seat = $total_year->sum(fn ($t) => $t->ticketSeats->count());
         $user = User::role('user')->get();
-        $movies = Movie::all();
 
-        foreach ($theaters as $theater) {
-            $total_seat = 0;
-            $total_price = 0;
-            foreach ($theater['rooms'] as $theater_room) {
-                foreach ($theater_room['schedules'] as $theater_schedule) {
-                    foreach ($theater_schedule['Ticket'] as $theater_ticket) {
-                        $total_seat += $theater_ticket['ticketseats']->count();
-                        $total_price += $theater_ticket['totalPrice'];
-                    }
-                }
-            }
-            $theater->setAttribute('totalPrice', $total_price);
-            $theater->setAttribute('ticketseats', $total_seat);
-        }
-
-        foreach ($movies as $movie) {
-            $total_seat = 0;
-            $total_price = 0;
-            foreach ($movie['schedules'] as $movie_schedule) {
-                foreach ($movie_schedule['Ticket'] as $movie_ticket) {
-                    $total_seat += $movie_ticket['ticketseats']->count();
-                    $total_price += $movie_ticket['totalPrice'];
-                }
-            }
-            $movie->setAttribute('totalPrice', $total_price);
-            $movie->setAttribute('ticketseats', $total_seat);
-        }
-
-        $movies = $movies->sortByDesc('totalPrice');
-
-
-
-        $sum = 0;
-        $sum_today = 0;
-
-        //total of month
-        foreach ($total_year as $value) {
-            $sum += $value['totalPrice'];
-        }
-        //total today
-        foreach ($ticket as $today) {
-            $sum_today += $today['totalPrice'];
-        }
+        $theaters = $this->attachTheaterTotals(Theater::orderBy('id', 'ASC')->get());
+        $movies = $this->attachMovieTotals(Movie::all());
 
         return view('admin.home.list', [
             'user' => $user,
             'ticket' => $ticket,
-            'sum' => $sum,
-            'sum_today' => $sum_today,
+            'sum' => $total_year->sum('totalPrice'),
+            'sum_today' => $ticket->sum('totalPrice'),
             'now' => $now,
             'start_of_month' => $start_of_month,
             'ticket_seat' => $ticket_seat,
@@ -94,210 +95,87 @@ class AdminController extends Controller
             'movies' => $movies
         ]);
     }
+
     public function filter_by_date(Request $request)
     {
-        $start_time = Carbon::createFromFormat('Y-m-d', $request->from_date)->startOfDay();
-        $end_time = Carbon::createFromFormat('Y-m-d', $request->to_date)->endOfDay(); // lấy ngày cuối cùng
-
-        $get = Ticket::whereBetween('created_at', [$start_time, $end_time])->where('holdState', 0)->orderBy('created_at', 'ASC')->get();
-        $value_first = $get->first();
-        $value_last = $get->last();
-
-        $date_current = date("d-m-Y", strtotime($value_first['created_at']));
-
-        $total = 0;
-        $seat_count = 0;
-        $chart_data = [];
-
-        foreach ($get as $value) {
-            if ($date_current == date("d-m-Y", strtotime($value['created_at']))) {
-                $total += $value['totalPrice'];
-                $seat_count += $value['ticketSeats']->count();
-            } else {
-                $data = array(
-                    'date' =>  $date_current,
-                    'total' => $total,
-                    'seat_count' => $seat_count
-                );
-                $date_current = date("d-m-Y", strtotime($value['created_at']));
-                $total = $value['totalPrice'];
-                $seat_count = $value['ticketSeats']->count();
-                array_push($chart_data, $data);
-            }
-            if ($value_last->id == $value['id']) {
-                $data = array(
-                    'date' => date("d-m-Y", strtotime($value['created_at'])),
-                    'total' => $total,
-                    'seat_count' => $seat_count
-                );
-                array_push($chart_data, $data);
-            }
+        if (!$request->from_date || !$request->to_date) {
+            return response()->json(['error' => 'Vui lòng chọn khoảng ngày']);
         }
+        $start_time = Carbon::createFromFormat('Y-m-d', trim($request->from_date))->startOfDay();
+        $end_time = Carbon::createFromFormat('Y-m-d', trim($request->to_date))->endOfDay();
+
         return response()->json([
             'success' => 'Thành công',
-            'chart_data' => $chart_data
+            'chart_data' => $this->chartData($this->paidTickets($start_time, $end_time), 'd-m-Y'),
         ]);
     }
 
     public function statistical_filter(Request $request)
     {
-
         $now = Carbon::now('Asia/Ho_Chi_Minh')->endOfDay();
-        $week = Carbon::now('Asia/Ho_Chi_Minh')->subDays(7)->startOfDay()->toDateString();
-        $this_month = Carbon::now('Asia/Ho_Chi_Minh')->startOfMonth()->toDateString();
-        $start_last_month = Carbon::now('Asia/Ho_Chi_Minh')->subMonth()->startOfMonth()->toDateString();
-        $end_last_month = Carbon::now('Asia/Ho_Chi_Minh')->subMonth()->endOfMonth()->toDateString();
-        $year = Carbon::now('Asia/Ho_Chi_Minh')->subDays(365)->startOfYear()->toDateString();
+        $format = 'd-m-Y';
 
-        if ($request['statistical_value'] == 'week') {
-            $get = Ticket::whereBetween('created_at', [$week, $now])->where('holdState', 0)->orderBy('created_at', 'ASC')->get();
-            $value_first = $get->first();
-            $value_last = $get->last();
-            $date_current = date("d-m-Y", strtotime($value_first['created_at']));
-        }
-        if ($request['statistical_value'] == 'year') {
-            $get = Ticket::whereBetween('created_at', [$year, $now])->where('holdState', 0)->orderBy('created_at', 'ASC')->get();
-            $value_first = $get->first();
-            $value_last = $get->last();
-            $date_current = date("m-Y", strtotime($value_first['created_at']));
-        }
-        if ($request['statistical_value'] == 'this_month') {
-            $get = Ticket::whereBetween('created_at', [$this_month, $now])->where('holdState', 0)->orderBy('created_at', 'ASC')->get();
-            $value_first = $get->first();
-            $value_last = $get->last();
-            $date_current = date("d-m-Y", strtotime($value_first['created_at']));
-        }
-        if ($request['statistical_value'] == 'last_month') {
-            $get = Ticket::whereBetween('created_at', [$start_last_month, $end_last_month])->where('holdState', 0)->orderBy('created_at', 'ASC')->get();
-            $value_first = $get->first();
-            $value_last = $get->last();
-            $date_current = date("d-m-Y", strtotime($value_first['created_at']));
-        }
-        function date_statistical($option, $date)
-        {
-            if ($option == 'year') {
-                return date("m-Y", strtotime($date));
-            } else {
-                return date("d-m-Y", strtotime($date));
-            }
-        }
-        $total = 0;
-        $seat_count = 0;
-        $chart_data = [];
-
-        foreach ($get as $value) {
-            if ($date_current == date_statistical($request['statistical_value'], $value['created_at'])) {
-                $total += $value['totalPrice'];
-                $seat_count += $value['ticketSeats']->count();
-            } else {
-                $data = array(
-                    'date' =>  $date_current,
-                    'total' => $total,
-                    'seat_count' => $seat_count
-                );
-                $date_current = date_statistical($request['statistical_value'], $value['created_at']);
-                $total = $value['totalPrice'];
-                $seat_count = $value['ticketSeats']->count();
-                array_push($chart_data, $data);
-            }
-            if ($value_last->id == $value['id']) {
-                $data = array(
-                    'date' => date_statistical($request['statistical_value'], $value['created_at']),
-                    'total' => $total,
-                    'seat_count' => $seat_count
-                );
-                array_push($chart_data, $data);
-            }
+        switch ($request['statistical_value']) {
+            case 'week':
+                $from = Carbon::now('Asia/Ho_Chi_Minh')->subDays(7)->startOfDay();
+                break;
+            case 'this_month':
+                $from = Carbon::now('Asia/Ho_Chi_Minh')->startOfMonth();
+                break;
+            case 'last_month':
+                $from = Carbon::now('Asia/Ho_Chi_Minh')->subMonthNoOverflow()->startOfMonth();
+                $now = Carbon::now('Asia/Ho_Chi_Minh')->subMonthNoOverflow()->endOfMonth();
+                break;
+            case 'year':
+                $from = Carbon::now('Asia/Ho_Chi_Minh')->subDays(365)->startOfYear();
+                $format = 'm-Y';
+                break;
+            default:
+                return response()->json(['error' => 'Lựa chọn không hợp lệ']);
         }
 
         return response()->json([
             'success' => 'Thành công',
-            'get' => $get,
-            'chart_data' => $chart_data,
+            'chart_data' => $this->chartData($this->paidTickets($from, $now), $format),
         ]);
     }
 
     public function statistical_sortby(Request $request)
     {
         $now = Carbon::now('Asia/Ho_Chi_Minh')->endOfDay();
-        $year = Carbon::now('Asia/Ho_Chi_Minh')->subDays(365)->startOfYear()->toDateString();
+        $year = Carbon::now('Asia/Ho_Chi_Minh')->subDays(365)->startOfYear();
+        $tickets = $this->paidTickets($year, $now);
 
-        $get = Ticket::whereBetween('created_at', [$year, $now])->where('holdState', 0)->orderBy('created_at', 'ASC')->get();
-        $value_first = $get->first();
-        $value_last = $get->last();
-        $date_current = date("m-Y", strtotime($value_first['created_at']));
-
-        $seat_count = 0;
-        $theaters = Theater::all();
-        foreach ($theaters as $theater) {
-            $total[$theater->id] = 0;
-        }
-        $chart_data = [];
         if ($request['statistical_value'] == 'ticket') {
-            foreach ($get as $value) {
-                if ($date_current == date("m-Y", strtotime($value['created_at']))) {
-                    $seat_count += $value['ticketSeats']->count();
-                } else {
-                    $data = array(
-                        'date' =>  $date_current,
-                        'seat_count' => $seat_count
-                    );
-                    $date_current = date("m-Y", strtotime($value['created_at']));
-                    $seat_count = $value['ticketSeats']->count();
-                    array_push($chart_data, $data);
-                }
-                if ($value_last->id == $value['id']) {
-                    $data = array(
-                        'date' => date("m-Y", strtotime($value['created_at'])),
-                        'seat_count' => $seat_count
-                    );
-                    array_push($chart_data, $data);
-                }
-            }
+            return response()->json([
+                'success' => 'Thành công',
+                'chart_data' => $this->chartData($tickets, 'm-Y'),
+            ]);
         }
-        if ($request['statistical_value'] == 'theater') {
-            foreach ($get as $value) {
-                if ($date_current == date("m-Y", strtotime($value['created_at']))) {
-                    if ($value->schedule_id != null) {
-                        $total[$value->schedule->room->theater_id] += $value['totalPrice'];
-                    }
-                } else {
-                    $data = array(
-                        'date' =>  $date_current,
-                    );
-                    foreach ($theaters as $theater) {
 
-                        $data[$theater->id] = $total[$theater->id];
-                        //                        dd($data);
-                    }
-                    $date_current = date("m-Y", strtotime($value['created_at']));
+        if ($request['statistical_value'] == 'theater') {
+            $theaters = Theater::orderBy('id', 'ASC')->get();
+            $chart_data = $tickets
+                ->groupBy(fn ($t) => date('m-Y', strtotime($t->created_at)))
+                ->map(function ($group, $date) use ($theaters) {
+                    $data = ['date' => $date];
                     foreach ($theaters as $theater) {
-                        if ($value->schedule_id != null && $value->schedule->room->theater_id == $theater->id) {
-                            $total[$theater->id] = $value['totalPrice'];
-                        } else {
-                            $total[$theater->id] = 0;
-                        }
+                        $data[(string) $theater->id] = $group
+                            ->filter(fn ($t) => $t->schedule && $t->schedule->room && $t->schedule->room->theater_id == $theater->id)
+                            ->sum('totalPrice');
                     }
-                    array_push($chart_data, $data);
-                }
-                if ($value_last->id == $value['id']) {
-                    $data = array(
-                        'date' =>  $date_current,
-                    );
-                    foreach ($theaters as $theater) {
-                        $data[$theater->id] = $total[$theater->id];
-                        //                        dd($data);
-                    }
-                }
-            }
+                    return $data;
+                })
+                ->values();
+
+            return response()->json([
+                'success' => 'Thành công',
+                'chart_data' => $chart_data,
+                'theaters' => $theaters->map(fn ($t) => ['id' => (string) $t->id, 'name' => $t->name])->values(),
+            ]);
         }
-        //        if($request['statistical_value'] == 'genre'){
-        //
-        //        }
-        return response()->json([
-            'success' => 'Thành công',
-            'chart_data' => $chart_data,
-        ]);
+
+        return response()->json(['error' => 'Lựa chọn không hợp lệ']);
     }
     //User
     public function user()
@@ -532,36 +410,10 @@ class AdminController extends Controller
         $output = '';
         if ($request->search_movie == null) {
             $movies = Movie::all();
-            foreach ($movies as $movie) {
-                $total_seat = 0;
-                $total_price = 0;
-                foreach ($movie['schedules'] as $movie_schedule) {
-                    foreach ($movie_schedule['Ticket'] as $movie_ticket) {
-                        $total_seat += $movie_ticket['ticketseats']->count();
-                        $total_price += $movie_ticket['totalPrice'];
-                    }
-                }
-                $movie->setAttribute('totalPrice', $total_price);
-                $movie->setAttribute('ticketseats', $total_seat);
-            }
-
-            $movies = $movies->sortByDesc('totalPrice');
+            $movies = $this->attachMovieTotals($movies);
         } else {
             $movies = Movie::where('name', 'LIKE', '%' . $request->search_movie . '%')->get();
-            foreach ($movies as $movie) {
-                $total_seat = 0;
-                $total_price = 0;
-                foreach ($movie['schedules'] as $movie_schedule) {
-                    foreach ($movie_schedule['Ticket'] as $movie_ticket) {
-                        $total_seat += $movie_ticket['ticketseats']->count();
-                        $total_price += $movie_ticket['totalPrice'];
-                    }
-                }
-                $movie->setAttribute('totalPrice', $total_price);
-                $movie->setAttribute('ticketseats', $total_seat);
-            }
-
-            $movies = $movies->sortByDesc('totalPrice');
+            $movies = $this->attachMovieTotals($movies);
         }
         if ($movies) {
             foreach ($movies as $movie) {
@@ -602,40 +454,10 @@ class AdminController extends Controller
         $output = '';
         if ($request->search_theater == null) {
             $theaters = Theater::all();
-            foreach ($theaters as $theater) {
-                $total_seat = 0;
-                $total_price = 0;
-                foreach ($theater['rooms'] as $theater_room) {
-                    foreach ($theater_room['schedules'] as $theater_schedule) {
-                        foreach ($theater_schedule['Ticket'] as $theater_ticket) {
-                            $total_seat += $theater_ticket['ticketseats']->count();
-                            $total_price += $theater_ticket['totalPrice'];
-                        }
-                    }
-                }
-                $theater->setAttribute('totalPrice', $total_price);
-                $theater->setAttribute('ticketseats', $total_seat);
-            }
-
-            $theaters = $theaters->sortByDesc('totalPrice');
+            $theaters = $this->attachTheaterTotals($theaters);
         } else {
             $theaters = Theater::where('name', 'LIKE', '%' . $request->search_theater . '%')->get();
-            foreach ($theaters as $theater) {
-                $total_seat = 0;
-                $total_price = 0;
-                foreach ($theater['rooms'] as $theater_room) {
-                    foreach ($theater_room['schedules'] as $theater_schedule) {
-                        foreach ($theater_schedule['Ticket'] as $theater_ticket) {
-                            $total_seat += $theater_ticket['ticketseats']->count();
-                            $total_price += $theater_ticket['totalPrice'];
-                        }
-                    }
-                }
-                $theater->setAttribute('totalPrice', $total_price);
-                $theater->setAttribute('ticketseats', $total_seat);
-            }
-
-            $theaters = $theaters->sortByDesc('totalPrice');
+            $theaters = $this->attachTheaterTotals($theaters);
         }
         if ($theaters) {
             foreach ($theaters as $theater) {

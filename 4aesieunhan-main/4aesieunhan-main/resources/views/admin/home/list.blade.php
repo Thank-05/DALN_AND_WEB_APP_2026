@@ -176,26 +176,25 @@
                             alert(data.error);
                         }
                     } else if (statistical_value == 'theater') {
+                        if (data['error']) {
+                            alert(data.error);
+                            return;
+                        }
+                        var theaters = data.theaters || [];
+                        var emptyRow = { date: null };
+                        theaters.forEach(function(t) { emptyRow[t.id] = null; });
                         chart = new Morris.Bar({
                             element: 'admin_chart',
-                            barColors: ['#fc8710', '#2dce89', '#A4ADD3', '#766B56'],
+                            barColors: ['#fc8710', '#2dce89', '#A4ADD3', '#766B56', '#09b1f3', '#FF6541'],
                             parseTime: false,
                             hideHover: 'auto',
-
-                            data: [{
-                                date: null,
-                                '1': null,
-                                '2': null,
-                                '3': null
-                            }],
+                            data: [emptyRow],
                             xkey: 'date',
-                            ykeys: ['1', '2', '3'],
-                            labels: ['Rạp Cao Lỗ', 'Rạp Hồ Gươm', 'Rạp VinCom Đà Nẵng']
+                            ykeys: theaters.map(function(t) { return t.id; }),
+                            labels: theaters.map(function(t) { return t.name; })
                         });
-                        if (data['success']) {
+                        if (data.chart_data.length) {
                             chart.setData(data.chart_data);
-                        } else if (data['error']) {
-                            alert(data.error);
                         }
                     }
                 }
