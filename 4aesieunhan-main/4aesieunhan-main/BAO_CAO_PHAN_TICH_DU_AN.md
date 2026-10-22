@@ -2,9 +2,6 @@
 
 ## Xây dựng website quản lý và đặt vé hệ thống rạp chiếu phim
 
-> **Mục đích tài liệu:** Bản thảo này tổng hợp nội dung báo cáo dựa trên mã nguồn dự án hiện có và đối chiếu với tài liệu tham khảo `BC_DALN.docx` do người dùng cung cấp. Có thể dùng làm khung nội dung cho báo cáo đồ án, nhưng cần bổ sung thông tin nhóm, giảng viên, thời gian thực hiện, ảnh giao diện và kết quả chạy thử thực tế.
-> **Nguyên tắc trình bày:** “Có trong mã nguồn” chỉ xác nhận tìm thấy route, controller, model, cấu hình hoặc giao diện liên quan; không đồng nghĩa chức năng đã được kiểm thử đầy đủ, triển khai ổn định hoặc sẵn sàng vận hành thật. Không đưa số liệu hiệu năng, số lượng người dùng, kết quả thanh toán hay trạng thái triển khai vào báo cáo nếu chưa tự đo và lưu lại bằng chứng.
-
 ---
 
 ## 1. Tóm tắt đề tài
