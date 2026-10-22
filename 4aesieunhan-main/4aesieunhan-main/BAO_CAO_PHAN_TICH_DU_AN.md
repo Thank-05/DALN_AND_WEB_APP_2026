@@ -1,4 +1,4 @@
-# BÁO CÁO PHÂN TÍCH VÀ MÔ TẢ DỰ ÁN
+# PHÂN TÍCH VÀ MÔ TẢ DỰ ÁN
 
 ## Xây dựng website quản lý và đặt vé hệ thống rạp chiếu phim
 
