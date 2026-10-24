@@ -91,7 +91,6 @@ Route::prefix('admin')->middleware('admin', 'role:admin|staff')->group(function 
         Route::get('/status', [MovieController::class, 'status']);
         Route::get('/search', [MovieController::class, 'searchMovie']);
     });
-
     //TODO Room
     Route::prefix('room')->group(function () {
         Route::get('/delete/{id}', [RoomController::class, 'delete']);
