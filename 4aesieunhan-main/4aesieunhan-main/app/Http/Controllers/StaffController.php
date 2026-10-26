@@ -9,6 +9,7 @@ use App\Models\Price;
 use App\Models\RoomType;
 use App\Models\Schedule;
 use App\Models\SeatType;
+use App\Models\Theater;
 use App\Models\Ticket;
 use App\Models\TicketCombo;
 use App\Models\TicketFood;
@@ -26,7 +27,19 @@ class StaffController extends Controller
     }
 
     public function buyTicket(Request $request) {
-        $theater = Auth::user()->theater;
+        // Admin không gắn cố định với một rạp nên được chọn rạp; nhân viên chỉ bán vé tại rạp được gán
+        $theaters = collect();
+        if (Auth::user()->hasRole('admin')) {
+            $theaters = Theater::where('status', 1)->get();
+            $theater = $theaters->firstWhere('id', $request->theater)
+                ?? Auth::user()->theater
+                ?? $theaters->first();
+        } else {
+            $theater = Auth::user()->theater;
+        }
+        if (!$theater) {
+            return redirect('admin')->with('warning', 'Tài khoản chưa được gán rạp, vui lòng liên hệ quản trị viên!');
+        }
         if (isset($request->date)) {
             $date_cur = $request->date;
         } else {
@@ -48,6 +61,7 @@ class StaffController extends Controller
             'movies' => $movies,
             'moviesEarly' => $moviesEarly,
             'theater' => $theater,
+            'theaters' => $theaters,
             'date_cur' => $date_cur,
             'roomTypes' => $roomTypes,
         ]);

@@ -12,7 +12,19 @@
                         <form action="/admin/buyTicket" method="get">
                             @csrf
                             <div class="row container mt-5">
-                                <div class="col-10">
+                                @if($theaters->isNotEmpty())
+                                    <div class="col-5">
+                                        <div class="input-group">
+                                            <span class="input-group-text bg-gray-200">Rạp</span>
+                                            <select class="form-select ps-2" name="theater" aria-label="">
+                                                @foreach($theaters as $item)
+                                                    <option value="{{ $item->id }}" @if($item->id == $theater->id) selected @endif>{{ $item->name }}</option>
+                                                @endforeach
+                                            </select>
+                                        </div>
+                                    </div>
+                                @endif
+                                <div class="{{ $theaters->isNotEmpty() ? 'col-5' : 'col-10' }}">
                                     <div class="input-group">
                                         <span class="input-group-text bg-gray-200"> @lang('lang.show_date')</span>
                                         <input class="form-control ps-2" type="date" min="{{ date('Y-m-d') }}" name="date" value="{{ $date_cur }}"
@@ -28,7 +40,7 @@
                         <div id="theaterSchedulesParent">
                             <div id="TheaterSchedules_{{$theater->id}}">
                                 <div class="mt-5">
-                                    <h4>Lịch chiếu phim</h4>
+                                    <h4>Lịch chiếu phim - {{ $theater->name }}</h4>
                                     <div class="d-block mt-2 mb-5">
                                         <div class="row">
                                             @foreach($movies as $movie)
