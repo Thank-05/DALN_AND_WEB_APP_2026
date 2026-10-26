@@ -34,7 +34,7 @@
         },
         "files": [
             "app/function/cloud_name.php",
-            "app/Helper/GlobalFunction.php"
+            "app/Http/Helper/GlobalFunction.php"
         ]
     },
     "autoload-dev": {
