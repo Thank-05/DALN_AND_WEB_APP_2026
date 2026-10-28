@@ -1,4 +1,4 @@
-# 🎬 QTCinema – Hệ thống đặt vé xem phim trực tuyến
+# 🎬 TTCinema – Hệ thống đặt vé xem phim trực tuyến
 
 Website đặt vé xem phim và trang quản trị rạp chiếu, xây dựng bằng **Laravel 9** (PHP 8.2). Đây là Đồ án tốt nghiệp (DALN) 2026.
 
@@ -224,8 +224,8 @@ MAIL_FROM_ADDRESS=your_email@gmail.com
 
 ```bash
 cd 4aesieunhan-main/4aesieunhan-main
-docker build -t qtcinema .
-docker run -p 10000:10000 --env-file .env qtcinema
+docker build -t ttcinema .
+docker run -p 10000:10000 --env-file .env ttcinema
 ```
 
 Ứng dụng chạy tại <http://localhost:10000>. Cơ sở dữ liệu MySQL cần được chạy riêng và cấu hình qua `DB_HOST` trong `.env`.
