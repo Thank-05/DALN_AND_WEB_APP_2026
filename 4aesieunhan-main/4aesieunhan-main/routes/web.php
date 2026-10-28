@@ -41,15 +41,16 @@ Route::prefix('/')->middleware('role:user|admin|staff')->group(function() {
 
     Route::post('/refund-ticket',[WebController::class,'refund_ticket']);
 
+    // Tạo, xóa vé giữ chỗ và combo: bắt buộc đăng nhập, controller kiểm tra chủ vé
+    Route::delete('/tickets/combo/delete', [WebController::class, 'ticketComboDelete']);
+    Route::post('/tickets/combo/create', [WebController::class, 'ticketComboCreate']);
+    Route::delete('/tickets/delete', [WebController::class, 'ticketDelete']);
+    Route::post('/tickets/create', [WebController::class, 'ticketPostCreate']);
+
     Route::get('/profile',[WebController::class,'profile']);
     Route::post('/editProfile',[WebController::class,'editProfile']);
     Route::post('/changePassword',[AuthController::class,'changePassword']);
 });
-
-Route::delete('/tickets/combo/delete', [WebController::class, 'ticketComboDelete']);
-Route::post('/tickets/combo/create', [WebController::class, 'ticketComboCreate']);
-Route::delete('/tickets/delete', [WebController::class, 'ticketDelete']);
-Route::post('/tickets/create', [WebController::class, 'ticketPostCreate']);
 
 Route::get('/update-password',[AuthController::class,'update_password']);
 Route::post('/update-password',[AuthController::class,'Post_update_password']);
@@ -58,6 +59,7 @@ Route::post('/forgot_password',[AuthController::class,'forgot_password']);
 
 
 Route::get('/verify-email',[AuthController::class,'verify_email']);
+Route::post('/resend-verify',[AuthController::class,'resend_verify'])->middleware('throttle:3,10');
 
 Route::post('/feedback',[WebController::class,'feedback']);
 Route::get('/contact',[WebController::class,'contact']);

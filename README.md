@@ -164,19 +164,15 @@ DB_PASSWORD=
 
 **5. Tạo bảng và dữ liệu mẫu**
 
-Repository không chứa file migration (thư mục `database/migrations` đang trống) và bản dump SQL dữ liệu mẫu không được đưa lên Git. Cần chuẩn bị schema MySQL trước, ví dụ import bản dump `cinema.sql`:
+Thư mục `database/migrations` đã có đủ migration cho 37 bảng. Với database trống:
 
 ```bash
-mysql -u root -p cinema < cinema.sql
+php artisan migrate --seed
 ```
 
-Hoặc dùng phpMyAdmin: chọn database `cinema` → tab **Import** → chọn file `.sql`.
+Lệnh trên tạo toàn bộ bảng và nạp dữ liệu mẫu (3 rạp, phòng, ghế, phim, bảng giá, 3 vai trò, 18 quyền, tài khoản mặc định).
 
-Nếu database mới chỉ có bảng mà chưa có dữ liệu, có thể nạp dữ liệu mẫu (rạp, phòng, ghế, phim, tài khoản, quyền, ...) bằng seeder:
-
-```bash
-php artisan db:seed
-```
+Nếu đã có database nhập từ bản dump cũ `cinema.sql`, chỉ cần chạy `php artisan migrate`: các migration tự bỏ qua bảng đã có và chỉ bổ sung các cột còn thiếu (`verify_token`, `reset_token`, `banners.user_id`).
 
 **6. Chạy ứng dụng**
 
@@ -222,13 +218,24 @@ MAIL_FROM_ADDRESS=your_email@gmail.com
 
 ## 🐳 Chạy bằng Docker
 
+Dự án có `Dockerfile` (PHP 8.2 + `gd`, `pdo_mysql`, `zip`) và `docker-compose.yml` (ứng dụng + MySQL 8.0):
+
 ```bash
 cd 4aesieunhan-main/4aesieunhan-main
-docker build -t ttcinema .
-docker run -p 10000:10000 --env-file .env ttcinema
+cp .env.example .env            # điền APP_KEY, DB_PASSWORD, DB_ROOT_PASSWORD, VNPay, Cloudinary, mail
+docker compose up -d --build    # container app tự chạy php artisan migrate --force
+docker compose exec app php artisan db:seed --force   # chỉ chạy lần đầu
 ```
 
-Ứng dụng chạy tại <http://localhost:10000>. Cơ sở dữ liệu MySQL cần được chạy riêng và cấu hình qua `DB_HOST` trong `.env`.
+Ứng dụng chạy tại <http://localhost:10000>. File `.env` không được đóng gói vào image (đã khai báo trong `.dockerignore`).
+
+### Triển khai lên VPS
+
+1. Cài Docker và Docker Compose trên VPS (Ubuntu 22.04 trở lên).
+2. `git clone` dự án, tạo `.env` từ `.env.example`, đặt `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL=https://<tên-miền>`.
+3. `docker compose up -d --build`, sau đó `docker compose exec app php artisan db:seed --force` ở lần đầu.
+4. Cấu hình Nginx làm reverse proxy từ cổng 80/443 về `127.0.0.1:10000` và cấp chứng chỉ HTTPS bằng Certbot.
+5. URL trả về của VNPay được sinh theo tên miền đang truy cập: `/payment/result` (khách hàng) và `/admin/buyTicket/vnpayResult` (tại quầy), nên website phải được truy cập qua đúng tên miền HTTPS. Nếu đứng sau Nginx, cấu hình `TrustProxies` để Laravel nhận đúng `https`.
 
 ---
 
@@ -314,9 +321,15 @@ Nếu chưa cấu hình VNPay, hệ thống hiển thị **trang QR demo** thay 
 
 ## 🧪 Kiểm thử
 
+Bộ kiểm thử dùng database riêng `cinema_test` (khai báo trong `phpunit.xml`):
+
 ```bash
+mysql -u root -e "CREATE DATABASE cinema_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+DB_DATABASE=cinema_test php artisan migrate --seed   # PowerShell: $env:DB_DATABASE="cinema_test"; php artisan migrate --seed
 php artisan test
 ```
+
+`tests/Feature/TicketFlowTest.php` kiểm tra: chặn khách chưa đăng nhập tạo vé, giá ghế và tổng tiền do máy chủ tính, chống giữ trùng ghế, áp mã giảm giá, chặn dùng điểm vượt số dư, chặn xóa và hoàn vé của người khác, thanh toán tiền mặt tại quầy, từ chối kết quả VNPay sai chữ ký, thông báo đăng nhập admin sai.
 
 ---
 

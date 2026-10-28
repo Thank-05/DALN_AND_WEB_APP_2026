@@ -351,25 +351,27 @@
                     <div id="Payment" class="mt-5 collapse" data-bs-parent="#mainTicket">
                         <form id="paymentForm" action="/payment/create" method="post">
                             @csrf
-                            {{--<table class="table table-striped">
+                            <h4 class="mt-4">Điểm thưởng</h4>
+                            <table class="table table-striped">
                                 <thead>
                                 <tr>
                                     <td>Tên</td>
-                                    <td>điểm hiện có</td>
+                                    <td>Điểm hiện có</td>
                                 </tr>
                                 </thead>
                                 <tbody>
                                 <tr>
                                     <td id="username">{{ Auth::user()->fullName }}</td>
-                                    <td id="userPoint">{{ Auth::user()->point }}</td>
+                                    <td id="userPoint">{{ (int) Auth::user()->point }}</td>
                                 </tr>
                                 </tbody>
                             </table>
                             <div class="input-group">
                                 <span class="input-group-text">Sử dụng điểm</span>
-                                <input id="point" class="form-control" min="20000"  name="point" type="number" placeholder="0"
+                                <input id="point" class="form-control" min="20000" name="point" type="number" placeholder="0"
                                        aria-label="">
-                            </div>--}}
+                            </div>
+                            <small id="point-validate" class="text-danger"></small>
                             <h4 class="mt-4">@lang('lang.discount')</h4>
                             <div class="bg-dark-subtle p-5">
                                 <div class="row row-cols-1">
@@ -728,15 +730,18 @@
                     dataType: 'json',
                     data: {
                         'ticket_id': $ticket_id,
-                        'totalPrice': $('#amount').val(),
+                        'hasDiscount': $('#hasDiscount').val(),
+                        'point': parseInt($('#point').val()) || 0,
                     },
-                    statusCode: {
-                        200: () => {
-                            $holdState = true;
-                            if ($ticket_id !== -1) {
-                                $("#paymentForm").trigger("submit");
-                            }
+                    success: (data) => {
+                        $holdState = true;
+                        $('#amount').val(data.totalPrice);
+                        if ($ticket_id !== -1) {
+                            $("#paymentForm").trigger("submit");
                         }
+                    },
+                    error: (xhr) => {
+                        alert((xhr.responseJSON && xhr.responseJSON.error) || 'Không thể thanh toán, vui lòng thử lại!');
                     }
                 });
             }
@@ -799,11 +804,30 @@
                 }
             })
 
-            // $('#point').bind('keyup', (e) => {
-            //     $sum2 = $sum - $('#point').val()
-            //     $('#ticketSeat_totalPrice').text($sum2.toLocaleString('vi-VN'));
-            //     $('#amount').val($sum2);
-            // })
+            // Dùng điểm: tối thiểu 20.000 điểm, tối đa 90% hóa đơn, không dùng chung mã giảm giá.
+            // Máy chủ kiểm tra lại các điều kiện này ở PaymentController@ticketPayment.
+            $('#point').bind('keyup change', (e) => {
+                $point = parseInt($('#point').val()) || 0;
+                $userPoint = parseInt($('#userPoint').text());
+                $('#point-validate').text('');
+                if ($point > 0 && $('#hasDiscount').val() !== 'false') {
+                    $('#point-validate').text('Không dùng điểm cùng mã giảm giá');
+                    $point = 0;
+                } else if ($point > $userPoint) {
+                    $('#point-validate').text('Điểm của quý khách không đủ');
+                    $point = 0;
+                } else if ($point > 0 && $point < 20000) {
+                    $('#point-validate').text('Sử dụng tối thiểu 20.000 điểm');
+                    $point = 0;
+                } else if ($point > $sum * 90 / 100) {
+                    $('#point-validate').text('Không sử dụng điểm quá 90% tổng tiền hóa đơn');
+                    $point = Math.floor($sum * 90 / 100);
+                    $('#point').val($point);
+                }
+                $sum2 = $sum - $point;
+                $('#ticketSeat_totalPrice').text($sum2.toLocaleString('vi-VN'));
+                $('#amount').val($sum2);
+            })
 
 
             $('#btn_apply_discount').click(function (){

@@ -16,7 +16,10 @@ use App\Models\TicketFood;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use App\Services\TicketPricing;
+use App\Services\VnpayService;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class StaffController extends Controller
 {
@@ -123,128 +126,114 @@ class StaffController extends Controller
 
     public function createPayment(Request $request)
     {
-        $ticket = Ticket::find($request->ticket_id);
-        $vnp_TmnCode = config('services.vnpay.tmn_code');
-        $vnp_HashSecret = config('services.vnpay.hash_secret');
-        $vnp_Url = config('services.vnpay.url');
-        if (!$vnp_TmnCode || !$vnp_HashSecret) {
-            throw new \RuntimeException('VNPay credentials are not configured.');
+        $ticket = Ticket::findOrFail($request->ticket_id);
+        $type = $request->type === 'combo' ? 'combo' : 'ticket';
+        if ($ticket->hasPaid) {
+            return redirect('admin/buy' . ucfirst($type))->with('fail', 'Vé này đã được thanh toán!');
         }
-        $vnp_Returnurl = $request->getSchemeAndHttpHost()
-            . "/payment/result?point=" . $request->point . "type=" . $request->type;
-        $vnp_apiUrl = "http://sandbox.vnpayment.vn/merchant_webapi/merchant.html";
-        $apiUrl = "https://sandbox.vnpayment.vn/merchant_webapi/api/transaction";
-        //Config input format
-        //Expire
-        $startTime = date("YmdHis");
-        $expire = date('YmdHis', strtotime('+' . $request->time . 'minutes', strtotime($startTime)));
-
-        $vnp_TxnRef = $ticket->code; //Mã giao dịch thanh toán tham chiếu của merchant
-        $vnp_Amount = $ticket->totalPrice; // Số tiền thanh toán
-        $vnp_Locale = $request->language; //Ngôn ngữ chuyển hướng thanh toán
-        $vnp_BankCode = $request->bankCode; //Mã phương thức thanh toán
-        $vnp_IpAddr = $_SERVER['REMOTE_ADDR']; //IP Khách hàng thanh toán
-
-
-        $inputData = array(
-            "vnp_Version" => "2.1.0",
-            "vnp_TmnCode" => $vnp_TmnCode,
-            "vnp_Amount" => $vnp_Amount * 100,
-            "vnp_Command" => "pay",
-            "vnp_CreateDate" => date('YmdHis'),
-            "vnp_CurrCode" => "VND",
-            "vnp_IpAddr" => $vnp_IpAddr,
-            "vnp_Locale" => $vnp_Locale,
-            "vnp_OrderInfo" => "Thanh toan GD:" . $vnp_TxnRef,
-            "vnp_OrderType" => "other",
-            "vnp_ReturnUrl" => $vnp_Returnurl,
-            "vnp_TxnRef" => $vnp_TxnRef,
-            "vnp_ExpireDate" => $expire
-        );
-
-        if (isset($vnp_BankCode) && $vnp_BankCode != "") {
-            $inputData['vnp_BankCode'] = $vnp_BankCode;
+        if (!VnpayService::isConfigured()) {
+            return redirect('admin/buy' . ucfirst($type))->with('fail', 'Chưa cấu hình VNPay, vui lòng thanh toán tiền mặt!');
         }
 
-        ksort($inputData);
-        $query = "";
-        $i = 0;
-        $hashdata = "";
-        foreach ($inputData as $key => $value) {
-            if ($i == 1) {
-                $hashdata .= '&' . urlencode($key) . "=" . urlencode($value);
-            } else {
-                $hashdata .= urlencode($key) . "=" . urlencode($value);
-                $i = 1;
-            }
-            $query .= urlencode($key) . "=" . urlencode($value) . '&';
-        }
+        // URL trả về trỏ tới handler của quầy, không dùng /payment/result của khách
+        $returnUrl = url('/admin/buyTicket/vnpayResult') . '?' . http_build_query(['type' => $type]);
 
-        $vnp_Url = $vnp_Url . "?" . $query;
-        $vnpSecureHash = hash_hmac('sha512', $hashdata, $vnp_HashSecret);
-        $vnp_Url .= 'vnp_SecureHash=' . $vnpSecureHash;
-        return redirect($vnp_Url);
+        return redirect()->away(VnpayService::paymentUrl($ticket, $returnUrl, $request, (int) ($request->time ?: 15)));
     }
 
+    /** Thanh toán tiền mặt tại quầy */
     public function handleResult(Request $request)
     {
-        if ($request->vnp_BankCode === 'MONEY') {
-            $request->vnp_Amount = $request->total;
-            $request->vnp_ResponseCode = '00';
-            $tickeById = Ticket::find($request->ticket_id);
-            $request->vnp_TxnRef = $tickeById->code;
+        $type = $request->type === 'combo' ? 'combo' : 'ticket';
+        $ticket = Ticket::find($request->ticket_id);
+        if (!$ticket || $ticket->hasPaid || $request->vnp_BankCode !== 'MONEY') {
+            return redirect('admin/buy' . ucfirst($type))->with('fail', 'thanh toán thất bại!');
         }
 
+        return $this->completeCounterPayment($ticket, $type);
+    }
 
-        $ticket = Ticket::where('code', $request->vnp_TxnRef)->get()->first();
-        switch ($request->vnp_ResponseCode) {
-            case '00':
-                if ($request->userCode) {
-                    $user = User::where('code', $request->userCode)->first();
-                    $money_payment = 0 ;
-                    foreach($user['ticket'] as $ticket)
-                    {
-                        $money_payment += $ticket['totalPrice'];
-                    }
-                    if($money_payment < 4000000){
-                        $point = ($ticket['totalPrice'])*5/100;
-                    } else {
-                        $point = ($ticket['totalPrice'])*10/100;
-                    }
-                    if ($request->point == null) {
-                        $user->point += $point;
-                    } else {
-                        $user->point -= $request->point;
-                    }
-                    $user->save();
-                }
-                $ticket->hasPaid = true;
-                $ticket->save();
+    /** Kết quả VNPay trả về khi bán tại quầy */
+    public function vnpayResult(Request $request)
+    {
+        $type = $request->query('type') === 'combo' ? 'combo' : 'ticket';
+        $redirect = 'admin/buy' . ucfirst($type);
 
-                if ($request->type == 'ticket') {
-                    return redirect('admin/buyTicket')->with('success', 'thanh toán thành công!');
-                } else {
-                    return redirect('admin/buyCombo')->with('success', 'thanh toán thành công!');
-                }
-            default:
-                Ticket::where('code', $request->vnp_TxnRef)->delete();
-                return redirect('admin/buyTicket')->with('fail', 'thanh toán thất bại!');
+        if (!VnpayService::validSignature($request)) {
+            return redirect($redirect)->with('fail', 'Chữ ký thanh toán không hợp lệ!');
         }
+        $ticket = Ticket::where('code', $request->query('vnp_TxnRef'))->first();
+        if (!$ticket) {
+            return redirect($redirect)->with('fail', 'Không tìm thấy vé!');
+        }
+        if ($ticket->hasPaid) {
+            return redirect($redirect)->with('success', 'thanh toán thành công!');
+        }
+        if (!VnpayService::succeeded($request)) {
+            $ticket->delete();
+            return redirect($redirect)->with('fail', 'thanh toán thất bại!');
+        }
+        if ((int) $request->query('vnp_Amount') !== (int) round($ticket->totalPrice) * 100) {
+            return redirect($redirect)->with('fail', 'Số tiền thanh toán không khớp!');
+        }
+
+        return $this->completeCounterPayment($ticket, $type);
+    }
+
+    private function completeCounterPayment(Ticket $ticket, string $type)
+    {
+        $pending = session()->pull('staff_payment.' . $ticket->id, ['member_id' => null, 'point' => 0]);
+
+        DB::transaction(function () use ($ticket, $pending) {
+            $ticket->hasPaid = true;
+            $ticket->save();
+
+            $member = $pending['member_id'] ? User::find($pending['member_id']) : null;
+            if (!$member) {
+                return;
+            }
+            if ($pending['point'] > 0) {
+                $member->point -= $pending['point'];
+            } else {
+                // Tổng chi tiêu dùng biến riêng, không ghi đè $ticket
+                $totalSpent = $member->ticket()->where('hasPaid', true)->sum('totalPrice');
+                $rate = $totalSpent < 4000000 ? 5 : 10;
+                $member->point += $ticket->totalPrice * $rate / 100;
+            }
+            $member->save();
+        });
+
+        return redirect('admin/buy' . ucfirst($type))->with('success', 'thanh toán thành công!');
     }
 
     public function ticketPayment(Request $request) {
         $ticket = Ticket::find($request->ticket_id);
-        $ticket->holdState = false;
-        $ticket->totalPrice = $request->totalPrice;
-        $user = User::where('code', $request->userCode)->get()->first();
-        if ($user) {
-            $ticket->user_id = $user->id;
-        } else {
-            $ticket->user_id = Auth::user()->id;
+        if (!$ticket || $ticket->hasPaid) {
+            return response()->json(['error' => 'Vé không hợp lệ'], 422);
         }
+
+        // Tổng tiền do máy chủ tính từ ghế, combo, món lẻ đã lưu
+        $total = TicketPricing::grossTotal($ticket);
+        $member = $request->userCode ? User::where('code', $request->userCode)->first() : null;
+        $point = (int) $request->point;
+        if ($point > 0) {
+            if (!$member || TicketPricing::validPoint($point, (int) $member->point, $total) === null) {
+                return response()->json(['error' => 'Số điểm sử dụng không hợp lệ'], 422);
+            }
+            $total -= $point;
+        }
+
+        $ticket->holdState = false;
+        $ticket->totalPrice = $total;
+        $ticket->user_id = $member ? $member->id : Auth::user()->id;
         $ticket->save();
 
-        return response('', 200);
+        session()->put('staff_payment.' . $ticket->id, [
+            'member_id' => $member ? $member->id : null,
+            'point' => $point,
+        ]);
+
+        return response()->json(['totalPrice' => $total]);
     }
 
     public function scanTicket() {
@@ -256,6 +245,15 @@ class StaffController extends Controller
         $check = true;
         $seatsList = '';
         $ticket = Ticket::where('code',  $request->code)->first();
+
+        // Mã không tồn tại, đơn chỉ có đồ ăn hoặc vé chưa thanh toán: báo lỗi thay vì lỗi máy chủ
+        if (!$ticket || !$ticket->schedule || !$ticket->hasPaid) {
+            return response()->json([
+                'theater' => '', 'room' => '', 'movie' => '', 'seats' => '', 'date' => '', 'startTime' => '',
+                'message' => !$ticket || !$ticket->schedule ? 'không tìm thấy vé' : 'vé chưa được thanh toán',
+                'check' => false,
+            ]);
+        }
 
         if ($ticket) {
             if ($ticket->schedule->date == date('Y-m-d')) {

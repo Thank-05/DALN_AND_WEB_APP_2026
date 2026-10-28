@@ -54,6 +54,7 @@ Route::prefix('admin')->middleware('admin', 'role:admin|staff')->group(function 
     //TODO Buy ticket
     Route::prefix('buyTicket')->group(function () {
         Route::post('/handleResult', [StaffController::class, 'handleResult']);
+        Route::get('/vnpayResult', [StaffController::class, 'vnpayResult']);
         Route::post('/createPayment', [StaffController::class, 'createPayment']);
         Route::post('/ticketPayment', [StaffController::class, 'ticketPayment']);
         Route::post('/scanBC', [StaffController::class, 'scanBarcode']);

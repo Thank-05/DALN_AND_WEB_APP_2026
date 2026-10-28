@@ -184,7 +184,7 @@ class AuthController extends Controller
     }
 
     /* ==================== GỬI LẠI MAIL KÍCH HOẠT ==================== */
-    // Route gợi ý: Route::post('/resend-verify', [AuthController::class, 'resend_verify'])->middleware('throttle:3,10');
+    // Route: POST /resend-verify (throttle 3 lần / 10 phút)
 
     public function resend_verify(Request $request)
     {

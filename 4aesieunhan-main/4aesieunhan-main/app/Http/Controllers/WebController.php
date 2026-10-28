@@ -24,6 +24,7 @@ use App\Models\TicketCombo;
 use App\Models\TicketSeat;
 use App\Models\User;
 use App\Models\Info;
+use App\Services\TicketPricing;
 use Carbon\Carbon;
 use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 use Illuminate\Http\Request;
@@ -160,49 +161,81 @@ class WebController extends Controller
 
     public function ticketPostCreate(Request $request)
     {
+        $request->validate([
+            'schedule' => 'required|integer|exists:schedules,id',
+            'ticketSeats' => 'required|array|min:1',
+        ]);
+        $schedule = Schedule::findOrFail($request->schedule);
+
+        $seatdbs = TicketSeat::select('ticketseats.row', 'ticketseats.col')
+            ->join('tickets', 'tickets.id', '=', 'ticketseats.ticket_id')
+            ->where('tickets.schedule_id', $schedule->id)
+            ->get();
+        $seats = [];
         foreach ($request->ticketSeats as $seat) {
-            $seatdbs = TicketSeat::select('ticketseats.row', 'ticketseats.col')
-                ->join('tickets', 'tickets.id', '=', 'ticketseats.ticket_id')
-                ->where('tickets.schedule_id', $request->schedule)
-                ->get();
             foreach ($seatdbs as $seatdb) {
                 if ($seat[0] == $seatdb->row && $seat[1] == $seatdb->col) {
                     return response('', 401);
                 }
             }
+            $seatModel = Seat::where('row', $seat[0])->where('col', $seat[1])
+                ->where('room_id', $schedule->room_id)->where('status', 1)->first();
+            if (!$seatModel) {
+                return response('', 422);
+            }
+            $seats[] = $seatModel;
         }
+
         $ticket = new Ticket([
-            'schedule_id' => $request->schedule,
+            'schedule_id' => $schedule->id,
             'user_id' => Auth::user()->id,
             'holdState' => true,
             'status' => true,
             'code' => rand(1000000000, 9999999999)
         ]);
         $ticket->save();
-        foreach ($request->ticketSeats as $seat) {
+        foreach ($seats as $seatModel) {
+            // Giá ghế do máy chủ tính, không lấy giá trình duyệt gửi lên
             $ticketSeat = new TicketSeat([
-                'row' => $seat[0],
-                'col' => $seat[1],
-                'price' => $seat[2],
+                'row' => $seatModel->row,
+                'col' => $seatModel->col,
+                'price' => TicketPricing::seatPrice($schedule, $seatModel),
                 'ticket_id' => $ticket->id,
             ]);
-            $seat = Seat::where('row', $seat[0])->where('col', $seat[1])->where('room_id', $ticket->schedule->room_id)->get()->first();
-            $ticketSeat->seatType = $seat->seatType->name;
+            $ticketSeat->seatType = $seatModel->seatType->name;
             $ticketSeat->save();
         }
 
         return response()->json(['ticket_id' => $ticket->id]);
     }
 
+    /** Chỉ chủ vé (hoặc nhân viên/admin đang bán tại quầy) mới được sửa vé chưa thanh toán */
+    private function canModifyTicket(?Ticket $ticket): bool
+    {
+        if (!$ticket || $ticket->hasPaid) {
+            return false;
+        }
+        $user = Auth::user();
+
+        return $ticket->user_id === $user->id || $user->hasRole(['admin', 'staff']);
+    }
+
     public function ticketDelete(Request $request)
     {
-        Ticket::destroy($request->ticket_id);
+        $ticket = Ticket::find($request->ticket_id);
+        if (!$this->canModifyTicket($ticket)) {
+            return response('forbidden', 403);
+        }
+        $ticket->delete();
         return response('delete success', 200);
     }
 
     public function ticketComboCreate(Request $request)
     {
         $ticket = Ticket::find($request->ticket_id);
+        if (!$this->canModifyTicket($ticket)) {
+            return response('forbidden', 403);
+        }
         foreach ($request->ticketCombos as $ticketCombo) {
             $combo = Combo::find($ticketCombo[0]);
             $details = '';
@@ -227,6 +260,9 @@ class WebController extends Controller
 
     public function ticketComboDelete(Request $request)
     {
+        if (!$this->canModifyTicket(Ticket::find($request->ticket_id))) {
+            return response('forbidden', 403);
+        }
         TicketCombo::where('ticket_id', $request->ticket_id)->delete();
         return response('delete combos success', 200);
     }
@@ -481,10 +517,7 @@ class WebController extends Controller
         } else {
             return redirect('/');
         }
-        $sum = 0;
-        foreach ($user['ticket'] as $ticket) {
-            $sum += $ticket['totalPrice'];
-        }
+        $sum = $user->ticket()->where('hasPaid', true)->sum('totalPrice');
         $sort_ticket = $user['ticket']->sortDesc();
         $sum_percent = ($sum * 100) / 4000000;
         return view('web.pages.profile', ['sort_ticket' => $sort_ticket, 'user' => $user, 'sum' => $sum, 'sum_percent' => $sum_percent]);
@@ -569,8 +602,11 @@ class WebController extends Controller
     public function refund_ticket(Request $request)
     {
         $ticket = Ticket::find($request->ticket_id);
-        $user = User::find($ticket['user_id']);
-        $money_payment = 0;
+        $user = Auth::user();
+        // Chỉ chủ vé mới được hoàn, và chỉ vé đã thanh toán, có suất chiếu
+        if (!$ticket || $ticket->user_id !== $user->id || !$ticket->hasPaid || !$ticket->schedule) {
+            return response()->json(['error' => 'Không tìm thấy vé hợp lệ để hoàn !']);
+        }
         if ($ticket['schedule']['date'] == date("Y-m-d")) {
             if (strtotime($ticket['schedule']['startTime']) - 3600 <= strtotime(date("H:i:s"))) {
 
@@ -583,19 +619,18 @@ class WebController extends Controller
         if ($ticket['hasDiscount'] == 1) {
             return response()->json(['error' => 'Vé đã áp dụng mã khuyến mãi nên không thể hoàn lại. Mong quý khách thông cảm !']);
         }
-        foreach ($user['ticket'] as $ticket) {
-            $money_payment += $ticket['totalPrice'];
-        }
-        if ($money_payment < 4000000) {
-            $user['point'] = $user['point'] - ($ticket['totalPrice'] * 5 / 100) +  $ticket['totalPrice'];
+        // Tổng chi tiêu dùng biến riêng, không ghi đè $ticket đang hoàn
+        $money_payment = $user->ticket()->where('hasPaid', true)->sum('totalPrice');
+        $rate = $money_payment < 4000000 ? 5 : 10;
+
+        DB::transaction(function () use ($user, $ticket, $rate) {
+            $user->point = $user->point - ($ticket->totalPrice * $rate / 100) + $ticket->totalPrice;
             $user->save();
-        } else {
-            $user['point'] = $user['point'] - ($ticket['totalPrice'] * 10 / 100) +  $ticket['totalPrice'];
-            $user->save();
-        }
-        $ticket->delete();
+            $ticket->delete();
+        });
         return response()->json(['success' => 'Gửi yêu cầu thành công,vé sẽ được hoàn vào điểm thưởng vui lòng kiểm tra điểm thưởng trong profile !']);
     }
+
     public function events_detail($id)
     {
         $post = Post::find($id);

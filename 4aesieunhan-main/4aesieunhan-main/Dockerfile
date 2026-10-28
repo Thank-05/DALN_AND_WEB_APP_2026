@@ -2,23 +2,30 @@ FROM php:8.2-cli
 
 WORKDIR /app
 
-COPY . .
-
 RUN apt-get update && apt-get install -y \
     git \
     unzip \
     libpng-dev \
     libjpeg-dev \
-    libfreetype6-dev
+    libfreetype6-dev \
+    libzip-dev \
+    && rm -rf /var/lib/apt/lists/*
 
+# gd cho mã QR/mã vạch, pdo_mysql để kết nối MySQL, zip cho composer
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg
-RUN docker-php-ext-install gd
+RUN docker-php-ext-install gd pdo_mysql zip
 
-RUN curl -sS https://getcomposer.org/installer | php
-RUN php composer.phar install
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-RUN chmod -R 777 storage bootstrap/cache
+# Cài thư viện trước để tận dụng cache khi chỉ sửa mã nguồn
+COPY composer.json composer.lock ./
+RUN composer install --no-dev --no-scripts --no-autoloader --prefer-dist
+
+COPY . .
+RUN composer dump-autoload --optimize \
+    && chmod -R 775 storage bootstrap/cache
 
 EXPOSE 10000
 
-CMD php artisan serve --host=0.0.0.0 --port=10000
+# Khóa bí mật (APP_KEY, DB, VNPay, Cloudinary, mail) truyền qua biến môi trường, không đóng gói vào image
+CMD php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=10000

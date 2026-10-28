@@ -56,6 +56,7 @@ $generatorPNG = new Picqer\Barcode\BarcodeGeneratorPNG();
                                             <labeL class="text-danger">
                                                 @if(isset($user['email']) && $user['email_verified']== 0)
                                                 @lang('lang.active_email')
+                                                <button type="submit" form="resendVerifyForm" class="btn btn-link btn-sm p-0 align-baseline">Gửi lại email kích hoạt</button>
                                                 @endif
                                             </labeL>
                                         </div>
@@ -214,6 +215,12 @@ $generatorPNG = new Picqer\Barcode\BarcodeGeneratorPNG();
         </div>
     </div>
 </section>
+    @if(isset($user['email']) && $user['email_verified'] == 0)
+        <form id="resendVerifyForm" action="/resend-verify" method="post" class="d-none">
+            @csrf
+            <input type="hidden" name="email" value="{{ $user['email'] }}">
+        </form>
+    @endif
 @endsection
 @section('js')
 <script>

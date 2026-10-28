@@ -378,9 +378,10 @@ class AdminController extends Controller
             ]
         );
         if (Auth::attempt(['email' => $request['email'], 'password' => $request['password']])) {
+            $request->session()->regenerate();
             return redirect('admin');
         } else {
-            return redirect('admin/sign_in')->with('warning', "Đăng nhập thành công!");
+            return redirect('admin/sign_in')->with('warning', "Email hoặc mật khẩu không đúng!");
         }
     }
 

@@ -189,8 +189,9 @@
                             <div id="Payment" class="mt-5 collapse" data-bs-parent="#mainTicket">
 
                                 <h4 class="mt-4">@lang('lang.payment')</h4>
-                                <form id="paymentForm" action="admin/buyTicket/createPayment" method="post">
+                                <form id="paymentForm" action="/admin/buyTicket/createPayment" method="post">
                                     @csrf
+                                    <input type="hidden" name="type" value="combo">
                                     <div class="bg-dark-subtle p-5">
                                         <div class="row row-cols-1" data-bs-parent="#mainContent">
                                             <div class="col">
@@ -452,11 +453,14 @@
                     dataType: 'json',
                     data: {
                         'ticket_id': $ticket_id,
-                        'totalPrice': $sum,
                         'userCode': $('#userId').val(),
                     },
+                    error: (xhr) => {
+                        alert((xhr.responseJSON && xhr.responseJSON.error) || 'Không thể thanh toán, vui lòng thử lại!');
+                    },
                     statusCode: {
-                        200: () => {
+                        200: (data) => {
+                            $('#total').val(data.totalPrice);
                             $holdState = true;
                             $bankCode = $(`input[name="bankCode"]:checked`).val();
                             if ($bankCode !== 'MONEY') {

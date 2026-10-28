@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Discount;
 use App\Models\Ticket;
+use App\Services\TicketPricing;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -20,16 +21,51 @@ class PaymentController extends Controller
     public function ticketPayment(Request $request)
     {
         $validated = $request->validate([
-            'ticket_id'  => 'required|integer|exists:tickets,id',
-            'totalPrice' => 'required|numeric|min:0',
+            'ticket_id'   => 'required|integer|exists:tickets,id',
+            'hasDiscount' => 'nullable',
+            'point'       => 'nullable|integer|min:0',
         ]);
 
         $ticket = Ticket::findOrFail($validated['ticket_id']);
+        $user   = Auth::user();
+        if ($ticket->user_id !== $user->id || $ticket->hasPaid) {
+            return response()->json(['error' => 'Vé không hợp lệ.'], 403);
+        }
+
+        // Máy chủ tự tính tổng tiền từ ghế và combo đã lưu, không dùng số tiền trình duyệt gửi lên
+        $total = TicketPricing::grossTotal($ticket);
+
+        $discountId = null;
+        $hasDiscount = (string) ($validated['hasDiscount'] ?? 'false');
+        if ($hasDiscount !== 'false' && $hasDiscount !== '') {
+            $discount = Discount::where('id', $hasDiscount)->where('status', 1)->where('quantity', '>', 0)->first();
+            if (!$discount) {
+                return response()->json(['error' => 'Mã giảm giá không còn hiệu lực.'], 422);
+            }
+            $discountId = $discount->id;
+            $total = (int) round($total * (100 - $discount->percent) / 100);
+        }
+
+        // Dùng điểm: không áp dụng chung với mã giảm giá
+        $point = (int) ($validated['point'] ?? 0);
+        if ($point > 0) {
+            if ($discountId) {
+                return response()->json(['error' => 'Không dùng điểm cùng mã giảm giá.'], 422);
+            }
+            if (TicketPricing::validPoint($point, (int) $user->point, $total) === null) {
+                return response()->json(['error' => 'Số điểm sử dụng không hợp lệ.'], 422);
+            }
+            $total -= $point;
+        }
+
         $ticket->holdState = false;
-        $ticket->totalPrice = $validated['totalPrice'];
+        $ticket->totalPrice = $total;
         $ticket->save();
 
-        return response('', 200);
+        // Lưu mã giảm giá và điểm phía máy chủ, không truyền qua URL trả về của VNPay
+        session()->put('payment.' . $ticket->id, ['discount_id' => $discountId, 'point' => $point]);
+
+        return response()->json(['totalPrice' => $total]);
     }
 
     public function create(Request $request)
@@ -74,11 +110,8 @@ class PaymentController extends Controller
         $now           = now(self::VNP_TIMEZONE);
         $expireMinutes = (int) ($validated['time'] ?? self::DEFAULT_EXPIRE_MINUTES);
 
-        // 5. URL trả về
-        $vnp_ReturnUrl = url('/payment/result') . '?' . http_build_query([
-            'point'       => $request->input('point', 0),
-            'hasDiscount' => $request->input('hasDiscount', 'false'),
-        ]);
+        // 5. URL trả về (mã giảm giá và điểm đã lưu trong session ở bước ticketPayment)
+        $vnp_ReturnUrl = url('/payment/result');
 
         $inputData = [
             'vnp_Version'    => '2.1.0',
@@ -157,33 +190,35 @@ class PaymentController extends Controller
         }
 
         // 5. Cập nhật vé, điểm, mã giảm giá trong 1 transaction
-        $user        = Auth::user();
-        $hasDiscount = (string) $request->query('hasDiscount', 'false');
+        $user    = Auth::user();
+        $pending = session()->pull('payment.' . $ticket->id, ['discount_id' => null, 'point' => 0]);
 
-        DB::transaction(function () use ($ticket, $user, $hasDiscount) {
+        DB::transaction(function () use ($ticket, $user, $pending) {
             $ticket->hasPaid = true;
-            if ($hasDiscount !== 'false') {
+            if ($pending['discount_id']) {
                 $ticket->hasDiscount = true;
             }
             $ticket->save();
+
+            if ($pending['discount_id']) {
+                Discount::where('id', $pending['discount_id'])->where('quantity', '>', 0)->decrement('quantity');
+                return;
+            }
 
             if (!$user) {
                 return;
             }
 
-            if ($hasDiscount === 'false') {
+            if ($pending['point'] > 0) {
+                // Có dùng điểm thì trừ điểm, không cộng điểm thưởng cho vé này
+                $user->point -= $pending['point'];
+            } else {
                 // Tổng tiền đã thanh toán (dùng biến riêng, không ghi đè $ticket)
                 $totalSpent = $user->ticket()->where('hasPaid', true)->sum('totalPrice');
                 $rate       = $totalSpent < 4000000 ? 5 : 10;
-
                 $user->point += $ticket->totalPrice * $rate / 100;
-                $user->save();
-            } else {
-                $discount = Discount::find($hasDiscount);
-                if ($discount && $discount->quantity > 0) {
-                    $discount->decrement('quantity');
-                }
             }
+            $user->save();
         });
 
         return redirect()->action([WebController::class, 'ticketCompleted'], $ticket->id);
