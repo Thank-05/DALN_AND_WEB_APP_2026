@@ -1,6 +1,6 @@
 # 🎬 TTCinema – Hệ thống đặt vé xem phim trực tuyến
 
-Website đặt vé xem phim và trang quản trị rạp chiếu, xây dựng bằng **Laravel 9** (PHP 8.2). Đây là Đồ án tốt nghiệp (DALN) 2026.
+Website đặt vé xem phim và trang quản trị rạp chiếu, xây dựng bằng **Laravel 9** (PHP 8.2). Đây là Đồ án liên nghành (DALN) 2026.
 
 Hệ thống gồm hai phần:
 
