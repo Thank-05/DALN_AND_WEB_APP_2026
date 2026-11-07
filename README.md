@@ -182,8 +182,8 @@ php artisan serve
 
 Truy cập:
 
-- Website: <http://localhost:8000>
-- Trang quản trị: <http:///admin/sign_in>
+- Website: <http://127.0.0.1:8000/>
+- Trang quản trị: <http://127.0.0.1:8000/admin/sign_in>
 
 ---
 
