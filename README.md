@@ -183,7 +183,7 @@ php artisan serve
 Truy cập:
 
 - Website: <http://localhost:8000>
-- Trang quản trị: <http://localhost:8000/admin/sign_in>
+- Trang quản trị: <http:///admin/sign_in>
 
 ---
 
@@ -227,7 +227,7 @@ docker compose up -d --build    # container app tự chạy php artisan migrate 
 docker compose exec app php artisan db:seed --force   # chỉ chạy lần đầu
 ```
 
-Ứng dụng chạy tại <http://localhost:10000>. File `.env` không được đóng gói vào image (đã khai báo trong `.dockerignore`).
+Ứng dụng chạy tại <http://127.0.0.1:8000/>. File `.env` không được đóng gói vào image (đã khai báo trong `.dockerignore`).
 
 ### Triển khai lên VPS
 
